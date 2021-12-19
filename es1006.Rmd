@@ -1,0 +1,253 @@
+---
+title: "ES1006 Analysis"
+author: "Roy Tan, U1940524B"
+date: "21/10/2021"
+output:
+
+  html_document:
+    code_folding: show
+    toc: yes
+    toc_float: yes
+    theme: flatly
+---
+
+```{r setup1, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE) 
+```
+
+```{r setup2, include=FALSE}
+library(readxl)
+library(dplyr) # data wrangling
+library(tidyverse)
+library(tidyr)
+library(ggplot2) # visualization
+library(ggfortify) # manipulating plots
+library(stringr) # replacing strings in db
+library(gridExtra) # manipulating plots
+library(car) # ANOVA testing
+library(viridis) # Plot Aes
+library(hrbrthemes) # Plot Aes
+library(FactoMineR) # PCA
+library(factoextra) # ggplot2 based visualiSation
+library(ggpubr) # graph aesthetics
+library(vegan) # dataset & NMDS
+library(goeveg) # NMDS screeplot
+library(EcolUtils) # Pairwise PERMANOVA
+library(mvabund)
+library(phyloseq)
+library(scales)
+library(gridExtra)
+
+```
+
+# Read Data
+```{r}
+trees_data <- read_excel("D:\\Compiled Trees.xlsx", sheet = "Sheet1")
+trees_data$Location <-as.factor(trees_data$Location)
+trees_data$Quadrat <-as.factor(trees_data$Quadrat)
+trees_data$DBH <-as.numeric(trees_data$DBH)
+```
+
+# Wrangling data
+```{r}
+trees.summary <- trees_data %>% 
+    dplyr::group_by(Quadrat,Location, Species) %>% 
+    dplyr::summarise(count = n())
+
+  trees.wide <- trees.summary  %>% 
+    tidyr::pivot_wider(names_from = "Species", 
+                       values_from="count")
+ trees.wide <- trees.wide %>% 
+    select(sort(names(.)))
+ 
+ trees.wide <- trees.wide %>%
+  select("Quadrat","Location", everything())
+ 
+ trees.wide[is.na(trees.wide)] = 0
+```
+
+```{r}
+trees.summary2 <- trees_data %>% 
+    dplyr::group_by(Location, Species) %>% 
+    dplyr::summarise(count = n())
+
+  trees.wide2 <- trees.summary2  %>% 
+    tidyr::pivot_wider(names_from = "Species", 
+                       values_from="count")
+ trees.wide2 <- trees.wide2 %>% 
+    select(sort(names(.)))
+ 
+ trees.wide2 <- trees.wide2 %>%
+  select("Location", everything())
+ 
+ trees.wide2[is.na(trees.wide2)] = 0
+trees.wide.nmds <- trees.wide2 %>% remove_rownames %>% column_to_rownames(var="Location")
+ 
+```
+
+# Raw Data Plots
+
+```{r}
+dbh.summary <- trees_data %>% 
+    dplyr::select(Quadrat,Location,DBH,Height)%>% 
+    dplyr::group_by(Quadrat,Location) %>% 
+    dplyr::summarise(n_samples = n(), 
+              mean_DBH = mean(DBH, na.rm=TRUE),
+              mean_Height = mean(Height, na.rm=TRUE))
+
+dbh.all <- trees_data %>% 
+    dplyr::select(Quadrat,Location,DBH,Height)%>% 
+    dplyr::group_by(Quadrat,Location) 
+
+colors = terrain.colors(6)[5:1]
+boxplot(mean_DBH~Location, data=dbh.summary, boxwex=0.5, col=colors, 
+        cex.axis=0.5, ylab="DBH")
+boxplot(mean_Height~Location, data=dbh.summary, boxwex=0.5, col=colors, 
+        cex.axis=0.5, ylab="Height")
+
+p3 <- ggplot(dbh.summary, aes(x = Location , y = mean_DBH, fill = Location),show.legend = FALSE) +
+  geom_violin(width = 1.3,
+              position = "dodge",
+              alpha = 0.8,show.legend = FALSE) +
+  geom_boxplot(width=0.1, color="black", alpha=0.5,show.legend = FALSE) +
+  labs (title = "Violin Plot of mean DBH per quadrat by Location",
+                x = "Location",
+        y = "Mean DBH" ) + 
+  theme_ipsum(axis_title_size =  14)
+
+p4 <- ggplot(dbh.summary, aes(x = Location , y = mean_Height, fill = Location),show.legend = FALSE) +
+  geom_violin(width = 1.3,
+              position = "dodge",
+              alpha = 0.8,show.legend = FALSE) +
+  geom_boxplot(width=0.1, color="black", alpha=0.5,show.legend = FALSE) +
+  labs (title = "Violin Plot of mean Height per quadrat by Location",
+                x = "Location",
+        y = "Mean Height" ) + 
+  theme_ipsum(axis_title_size =  14)
+
+grid.arrange(p3, p4, ncol=2)
+
+trees.summary3 <- trees_data %>% 
+    dplyr::group_by(Location, Quadrat) %>% 
+    dplyr::summarise(count = n())
+
+mod.dbh <- lm(mean_DBH~Location, data=dbh.summary)
+summary(aov(mod.dbh))
+TukeyHSD(aov(mod.dbh))
+
+mod.height <- lm(mean_Height~Location, data=dbh.summary)
+summary(aov(mod.height))
+TukeyHSD(aov(mod.height))
+
+```
+
+# Raw Diversity Data
+```{r}
+shannon<- diversity(trees.wide.nmds,index = "shannon")
+simpson<- diversity(trees.wide.nmds,index = "simpson")
+par(mfrow = c(1, 2))  # use par to generate panels with 1 row of 2 graphs
+hist(simpson)
+hist(shannon)
+```
+
+# Diversity analysis
+```{r}
+# abundance matrix
+abundance.matrix <- trees.wide[3:52]
+
+# store computed indices in a new data frame called 'indices'
+indices <- trees.wide[,c("Quadrat","Location")]
+indices$Richness <- rowSums(abundance.matrix>0)
+indices$Shannon <- diversity(abundance.matrix) # shannon is default
+
+colors = terrain.colors(6)[5:1]
+boxplot(Richness~Location, data=indices, boxwex=0.5, col=colors, 
+        cex.axis=0.5, ylab="Richness")
+boxplot(Shannon~Location, data=indices, boxwex=0.5, col=colors, 
+        cex.axis=0.5, ylab="Shannon diversity")
+
+p1 <- ggplot(indices, aes(x = Location , y = Richness, fill = Location),show.legend = FALSE) +
+  geom_violin(width = 1.3,
+              position = "dodge",
+              alpha = 0.8,show.legend = FALSE) +
+  geom_boxplot(width=0.1, color="black", alpha=0.5,show.legend = FALSE) +
+  labs (title = "Violin Plot of Richness by Location",
+                x = "Location",
+        y = "Richness") + 
+  theme_ipsum( axis_title_size =  14)
+
+p2 <- ggplot(indices, aes(x = Location , y = Shannon, fill = Location),show.legend = FALSE) +
+  geom_violin(width = 1.3,
+              position = "dodge",
+              alpha = 0.8,show.legend = FALSE) +
+  geom_boxplot(width=0.1, color="black", alpha=0.5,show.legend = FALSE) +
+  labs (title = "Violin Plot of Diversity by Location",
+                x = "Location",
+        y = "Shannon Diversity" ) + 
+  theme_ipsum(axis_title_size =  14)
+
+grid.arrange(p1, p2, ncol=2)
+
+mod.shannon <- lm(Shannon~Location, data=indices)
+TukeyHSD(aov(mod.shannon))
+summary(aov(mod.shannon))
+pairwise.t.test(indices$Shannon, indices$Location, p.adj = "none")
+
+
+
+```
+
+# Plotting Ordination
+```{r}
+NMDS <- metaMDS(trees.wide.nmds, k = 2, trymax = 100, 
+                     trace = F, autotransform = F,
+                     distance="bray")   
+stressplot(NMDS) # Ordination too stressed, using CCA instead
+
+# Creating CCA plot
+my.ca <- cca(trees.wide.nmds)
+barplot(my.ca$CA$eig/my.ca$tot.chi, names.arg = 1:my.ca$CA$rank, cex.names = 0.5, ylab="Proportion of variance explained", xlab="CA axis") # Variance explained
+head(my.ca$CA$eig/my.ca$CA$tot.chi)
+
+# Plot overlapping CCA plot
+plot(my.ca, scaling="symmetric", main="scaling = 3, both",cex=1.25,col="red")
+
+# Plot Seperate CCA plots by species and location
+layout(matrix(1:2,1,2))
+ordiplot(my.ca,type="n", main="CCA plot - Sites") #Ordination plot function especially for congested plots
+orditorp(my.ca,display="sites",cex=1.5,air=0.1) #The function adds text or points to ordination plots
+
+ordiplot(my.ca,type="n", main="CCA plot - Species")
+orditorp(my.ca,display="species",col="red",air=0.2, cex=1) #The function adds text or points to ordination plots
+
+```
+
+# Miscellaneous Plots
+
+
+```{r}
+my.ca <- cca(abundance.matrix)
+barplot(my.ca$CA$eig/my.ca$tot.chi, names.arg = 1:my.ca$CA$rank, cex.names = 0.5, ylab="Proportion of variance explained", xlab="CA axis")
+head(my.ca$CA$eig/my.ca$CA$tot.chi)
+plot(my.ca)
+```
+
+```{r}
+tree_community <- trees.wide[3:52]
+tree_spp <- mvabund(trees.wide[,3:52])
+boxplot(trees.wide[,3:52],horizontal = TRUE,las=2, main="Abundance")
+meanvar.plot(tree_spp)
+
+plot(tree_spp~trees.wide$Quadrat, cex.axis=0.8, cex=0.8)
+
+mod1 <- manyglm(tree_spp ~ trees.wide$Location, family="poisson")
+plot(mod1)
+
+mod2 <- manyglm(tree_spp ~ trees.wide$Location, family="negative_binomial")
+plot(mod2)
+
+anova(mod1, p.uni="adjusted")
+```
+
+
+
